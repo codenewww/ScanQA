@@ -116,6 +116,7 @@ def get_answer_cands(args, scanqa):
     answer_max_size = args.answer_max_size
     if answer_max_size < 0:
         answer_max_size = len(answer_counter)
+    #创建字典对象，包含概率最高的几个元素
     answer_counter = dict([x for x in answer_counter.most_common()[:answer_max_size] if x[1] >= args.answer_min_freq])
     print("using {} answers out of {} ones".format(len(answer_counter), num_all_answers))    
     answer_cands = sorted(answer_counter.keys())
@@ -157,6 +158,7 @@ def get_model(args, config):
     if "bert-" in args.tokenizer_name:
         from transformers import AutoConfig
         bert_model_name = args.tokenizer_name
+        #获得BERT模型的配置
         bert_config = AutoConfig.from_pretrained(bert_model_name)
         if hasattr(bert_config, "hidden_size"):
             lang_emb_size = bert_config.hidden_size
@@ -217,6 +219,7 @@ def get_model(args, config):
 
 
 def get_num_params(model):
+    #过滤掉反向过程中不需要梯度计算的参数
     model_parameters = filter(lambda p: p.requires_grad, model.parameters())
     num_params = int(sum([np.prod(p.size()) for p in model_parameters]))
 
@@ -310,6 +313,7 @@ def save_info(args, root, num_params, train_dataset, val_dataset):
     info["num_val_scenes"] = len(val_dataset.scene_list)
     info["num_params"] = num_params
 
+    #把所有信息和问题词典保存为json文件
     with open(os.path.join(root, "info.json"), "w") as f:
         json.dump(info, f, indent=4)
 
@@ -320,6 +324,7 @@ def save_info(args, root, num_params, train_dataset, val_dataset):
 
 
 def get_scannet_scene_list(split):
+    #文本文件读取场景列表，并按字母顺序排序
     scene_list = sorted([line.rstrip() for line in open(os.path.join(CONF.PATH.SCANNET_META, "scannetv2_{}.txt".format(split)))])
     return scene_list
 
@@ -368,6 +373,7 @@ def get_scanqa(scanqa_train, scanqa_val, train_num_scenes, val_num_scenes):
 
 def train(args):
     # WandB init    
+    #初始化一个Weights&Biases项目，同时记录和可视化实验配置信息和训练过程中指标
     wandb.init(project=project_name, config=args)
 
     # init training dataset
@@ -390,6 +396,7 @@ def train(args):
 
     print("initializing...")
     solver, num_params, root, stamp = get_solver(args, dataloader)
+    #更改和保存当前运行的名称，确保记录的实验结果能与指定名称关联并持久保存
     if stamp:
         wandb.run.name = stamp
         wandb.run.save()
@@ -404,11 +411,12 @@ if __name__ == "__main__":
     os.environ["CUDA_VISIBLE_DEVICES"] = args.gpu
     os.environ["CUDA_LAUNCH_BLOCKING"] = "1"
 
-    # reproducibility
-    torch.manual_seed(args.seed)
-    torch.backends.cudnn.deterministic = True
-    torch.backends.cudnn.benchmark = False
-    np.random.seed(args.seed)
+    # reproducibility复现性
+    #使用pytorch进行深度学习训练时，使随机性受控制，必要时复现实验结果
+    torch.manual_seed(args.seed)#设置pyorch的随机数种子
+    torch.backends.cudnn.deterministic = True#设置cudnn库的行为为确定性模式，使得gpu上结果可复现
+    torch.backends.cudnn.benchmark = False#关闭cudnn的自动调整算法
+    np.random.seed(args.seed)#设置numpy的随机数种子
 
     train(args)
     
