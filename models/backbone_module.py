@@ -5,6 +5,7 @@ import numpy as np
 import sys
 import os
 
+#将当前工作目录下的 "lib" 子目录添加到 Python 模块搜索路径中，以便在运行时可以导入位于该目录下的模块或文件
 sys.path.append(os.path.join(os.getcwd(), "lib")) # HACK add the lib folder
 from lib.pointnet2.pointnet2_modules import PointnetSAModuleVotes, PointnetFPModule
 
@@ -25,6 +26,8 @@ class Pointnet2Backbone(nn.Module):
         self.input_feature_dim = input_feature_dim
 
         # --------- 4 SET ABSTRACTION LAYERS ---------
+        #用于对输入点云进行子采样和特征提取。通过在局部邻域内对点云进行操作，它可以捕捉局部形状和结构信息
+        #mlp后面列表中三个元素分别表示输入特征维度、经过一系列全连接处理、输出特征维度
         self.sa1 = PointnetSAModuleVotes(
                 npoint=2048,
                 radius=0.2,
@@ -66,11 +69,14 @@ class Pointnet2Backbone(nn.Module):
             )
 
         # --------- 2 FEATURE UPSAMPLING LAYERS --------
+        #聚合来自较低层次的特征，以生成更高层次的特征表示
         #self.fp1 = PointnetFPModule(mlp=[256+256,256,256])
         #self.fp2 = PointnetFPModule(mlp=[256+256,256,256])
         self.fp1 = PointnetFPModule(mlp=[256 * width + 256 * width, 256 * width, 256 * width])
         self.fp2 = PointnetFPModule(mlp=[256 * width + 256 * width, 256 * width, seed_feat_dim])
 
+   
+    #将输入点云数据最后维度信息拆分成坐标信息和特征信息两部分
     def _break_up_pc(self, pc):
         xyz = pc[..., :3].contiguous()
         features = pc[..., 3:].transpose(1, 2).contiguous() if pc.size(-1) > 3 else None
@@ -91,10 +97,10 @@ class Pointnet2Backbone(nn.Module):
 
             Returns
             ----------
-            data_dict: {XXX_xyz, XXX_features, XXX_inds}
-                XXX_xyz: float32 Tensor of shape (B,K,3)
+            data_dict: {XXX_xyz, XXX_features, XXX_inds}坐标、特征、索引信息
+                XXX_xyz: float32 Tensor of shape (B,K,3)#K是每个点云中点的数量
                 XXX_features: float32 Tensor of shape (B,K,D)
-                XXX-inds: int64 Tensor of shape (B,K) values in [0,N-1]
+                XXX-inds: int64 Tensor of shape (B,K) values in [0,N-1]#表示每个点云中点的索引
         """
         
         pointcloud = data_dict["point_clouds"] # batch, num_points, 4 (16, 40000, 4)
@@ -133,7 +139,8 @@ class Pointnet2Backbone(nn.Module):
 if __name__=='__main__':
     backbone_net = Pointnet2Backbone(input_feature_dim=3).cuda()
     print(backbone_net)
-    backbone_net.eval()
+    backbone_net.eval()#将模型设置为评估模式
+    #生成一个形状为 (16, 20000, 6) 的随机张量，表示一个批量大小为16，每个点云有20000个点，每个点有6个特征
     out = backbone_net(torch.rand(16,20000,6).cuda())
     for key in sorted(out.keys()):
         print(key, '\t', out[key].shape)
