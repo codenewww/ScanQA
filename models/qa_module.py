@@ -157,10 +157,12 @@ class ScanQA(nn.Module):
         # unpack outputs from detection branch
         object_feat = data_dict['aggregated_vote_features'] # batch_size, num_proposal, proposal_size (128)
         if self.use_object_mask:
+            #创建取反的对象掩码。确保上下文中，梯度不传播到bbox_mask
             object_mask = ~data_dict["bbox_mask"].bool().detach() #  # batch, num_proposals
         else:
             object_mask = None            
 
+       #如果是二维的，可能是矩阵，不符合处理要求。分别两次在两个维度拓展，成为四维的
         if lang_mask.dim() == 2:
             lang_mask = lang_mask.unsqueeze(1).unsqueeze(2)
         if object_mask.dim() == 2:
@@ -191,6 +193,8 @@ class ScanQA(nn.Module):
             #  tensor([[-0.2910, -0.2910, -0.1096],
             #          [0.7795, -0.2910,  1.2384]]    
             # mask out invalid proposals
+            #基于对象置信度分数，加权处理对象特征
+            #沿第二个维度进行最大值操作，返回最大值和对应索引。[1]表示取索引值
             object_conf_feat = object_feat * data_dict['objectness_scores'].max(2)[1].float().unsqueeze(2)
             data_dict["cluster_ref"] = self.object_cls(object_conf_feat).squeeze(-1) 
 
