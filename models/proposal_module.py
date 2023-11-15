@@ -17,6 +17,7 @@ sys.path.append(os.path.join(os.getcwd(), "lib")) # HACK add the lib folder
 import lib.pointnet2.pointnet2_utils
 from lib.pointnet2.pointnet2_modules import PointnetSAModuleVotes
 
+#目的是从输入的点云数据中生成目标proposal，并将它们聚合成较小数量的proposal
 class ProposalModule(nn.Module):
     def __init__(self, num_class, num_heading_bin, num_size_cluster, mean_size_arr, num_proposal, sampling, seed_feat_dim=256, proposal_size=128, radius=0.3, nsample=16):
         super().__init__() 
@@ -74,14 +75,17 @@ class ProposalModule(nn.Module):
         data_dict['aggregated_vote_inds'] = sample_inds # (batch_size, num_proposal,) # should be 0,1,2,...,num_proposal
 
         # --------- PROPOSAL GENERATION ---------
+        #对采样后的点特征进行proposal生成
         net = self.proposal(features)
         # net: batch, ???, num_proposals (32, 97, 256)
         data_dict = self.decode_scores(net, data_dict, self.num_class, self.num_heading_bin, self.num_size_cluster, self.mean_size_arr)
 
         return data_dict
 
+    #将模型输出预测信息解码为三维边界框，用于目标检测等后续任务
     def decode_pred_box(self, data_dict):
         # predicted bbox
+        #获取张量在cpu的Numpy表示
         pred_center = data_dict["center"].detach().cpu().numpy() # (B,K,3)
         pred_heading_class = torch.argmax(data_dict["heading_scores"], -1) # B,num_proposal
         pred_heading_residual = torch.gather(data_dict["heading_residuals"], 2, pred_heading_class.unsqueeze(-1)) # B,num_proposal,1
