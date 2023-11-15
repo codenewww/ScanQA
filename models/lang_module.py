@@ -22,9 +22,12 @@ class LangModule(nn.Module):
         self.bert_model_name = bert_model_name
         self.use_bert_model = bert_model_name is not None
 
+        #根据选择的配置对 BERT 模型进行初始化和微调。可能的配置包括冻结整个 BERT 模型、仅微调最后一层
+            #或 transformer layer。这种微调操作允许在特定任务上使用 BERT 模型并进行进一步的训练。
         if self.use_bert_model:
             from transformers import AutoModel 
             self.bert_model = AutoModel.from_pretrained(bert_model_name)
+            #两个选项决定是否冻结整个 BERT 模型或者仅微调最后一层。确保两者不同时为true
             assert not (freeze_bert and finetune_bert_last_layer)
             if freeze_bert:
                 for param in self.bert_model.parameters():
@@ -39,10 +42,12 @@ class LangModule(nn.Module):
                     for param in self.bert_model.transformer.layer[-1].parameters():
                         param.requires_grad = True                    
 
+       
+        #lstm处理文本和时间序列
         self.lstm = nn.LSTM(
             input_size=emb_size,
             hidden_size=hidden_size,
-            batch_first=True,
+            batch_first=True,#指定输入和输出张量的第一个维度是否是批量大小
             num_layers=num_layers,
             bidirectional=use_bidir,
             dropout=0.1 if num_layers > 1 else 0,
@@ -56,6 +61,7 @@ class LangModule(nn.Module):
         # Language classifier
         #   num_object_class -> 18
         if use_lang_classifier:
+            #表示包含dropout和线性层两层
             self.lang_cls = nn.Sequential(
                 nn.Dropout(p=pdrop),
                 nn.Linear(lang_size, num_object_class),
@@ -66,6 +72,7 @@ class LangModule(nn.Module):
         """
         return a mask that is True for zero values and False for other values.
         """
+        #判断feature沿最后一个维度的绝对值之和是否为0
         return (torch.sum(
             torch.abs(feature),
             dim=-1
@@ -93,6 +100,7 @@ class LangModule(nn.Module):
         data_dict["lang_out"] = lang_output # batch_size, num_words(max_question_length), hidden_size * num_dir
 
         # lang_last: (num_layers * num_directions, batch_size, hidden_size)
+        #将多层循环神经网络最后一层的隐藏状态处理成一个形状为 (batch_size, hidden_size * num_directions) 的张量
         _, batch_size, hidden_size = lang_last.size()
         lang_last = lang_last.view(self.num_layers, -1, batch_size, hidden_size) 
         # lang_last: num_directions, batch_size, hidden_size
@@ -100,6 +108,7 @@ class LangModule(nn.Module):
         lang_last = lang_last.permute(1, 0, 2).contiguous().flatten(start_dim=1) # batch_size, hidden_size * num_dir
 
         # store the encoded language features
+        #将处理过的编码语言特征存储在数据字典中，并生成相应的语言掩码。语言掩码的目的是标记输入序列中的哪些位置是有效的，哪些是填充的或者无效的
         data_dict["lang_emb"] = lang_last # batch_size, hidden_size * num_dir
         if self.use_bert_model:
             data_dict["lang_mask"] = ~data_dict["lang_feat"]["attention_mask"][:,:lang_output.shape[1]].bool() # batch_size, num_words (max_question_length)
@@ -107,6 +116,7 @@ class LangModule(nn.Module):
             data_dict["lang_mask"] = self.make_mask(lang_output) # batch_size, num_words (max_question_length)
 
         # classify
+        #nlp中常见于文本分类或情感分析
         if self.use_lang_classifier:
             data_dict["lang_scores"] = self.lang_cls(data_dict["lang_emb"])
         return data_dict
