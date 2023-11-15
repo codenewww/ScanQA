@@ -8,6 +8,7 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 
+#对点云进行聚合或投票，以产生对整个点云的汇总表示
 class VotingModule(nn.Module):
     def __init__(self, vote_factor, seed_feature_dim):
         """ Votes generation from seed point features.
@@ -61,6 +62,8 @@ class VotingModule(nn.Module):
 
 if __name__=='__main__':
     net = VotingModule(2, 256).cuda()
+    #模拟点的坐标 xyz 和点的特征 features。这两个张量的形状分别为 (8, 1024, 3) 和 (8, 256, 1024)，
+    #表示8个点云，每个点云包含1024个点，每个点有3维坐标和256维特征。
     xyz, features = net(torch.rand(8,1024,3).cuda(), torch.rand(8,256,1024).cuda())
     print('xyz', xyz.shape)
     print('features', features.shape)
