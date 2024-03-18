@@ -116,7 +116,7 @@ def get_answer_cands(args, scanqa):
     answer_max_size = args.answer_max_size
     if answer_max_size < 0:
         answer_max_size = len(answer_counter)
-    #创建字典对象，包含概率最高的几个元素
+    #创建字典对象，包含概率最高的几个元素，只保留出现频率高于指定的答案
     answer_counter = dict([x for x in answer_counter.most_common()[:answer_max_size] if x[1] >= args.answer_min_freq])
     print("using {} answers out of {} ones".format(len(answer_counter), num_all_answers))    
     answer_cands = sorted(answer_counter.keys())
@@ -160,6 +160,7 @@ def get_model(args, config):
         bert_model_name = args.tokenizer_name
         #获得BERT模型的配置
         bert_config = AutoConfig.from_pretrained(bert_model_name)
+        #判断有无对象属性hidden_size
         if hasattr(bert_config, "hidden_size"):
             lang_emb_size = bert_config.hidden_size
         else:
@@ -304,6 +305,7 @@ def get_solver(args, dataloader):
 
 def save_info(args, root, num_params, train_dataset, val_dataset):
     info = {}
+    #将args所有属性以及对应值转化为字典以供后续使用
     for key, value in vars(args).items():
         info[key] = value
     
@@ -317,6 +319,7 @@ def save_info(args, root, num_params, train_dataset, val_dataset):
     with open(os.path.join(root, "info.json"), "w") as f:
         json.dump(info, f, indent=4)
 
+    #答案计数器，即每个答案出现次数
     answer_vocab = train_dataset.answer_counter
     with open(os.path.join(root, "answer_vocab.json"), "w") as f:
         json.dump(answer_vocab, f, indent=4)        
@@ -378,6 +381,7 @@ def train(args):
 
     # init training dataset
     print("preparing data...")
+    #根据自定义的train和val的需求场景数目生成对应场景列表
     scanqa_train, scanqa_val, all_scene_list = get_scanqa(SCANQA_TRAIN, SCANQA_VAL, args.train_num_scenes, args.val_num_scenes)
     scanqa = {
         "train": scanqa_train,
