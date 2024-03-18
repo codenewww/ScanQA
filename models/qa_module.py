@@ -100,8 +100,10 @@ class ScanQA(nn.Module):
         )
 
         # QA head
+        #对应视觉和语言特征的注意力模块
         self.attflat_visual = AttFlat(hidden_size, mcan_flat_mlp_size, mcan_flat_glimpses, mcan_flat_out_size, 0.1)
         self.attflat_lang = AttFlat(hidden_size, mcan_flat_mlp_size, mcan_flat_glimpses, mcan_flat_out_size, 0.1)
+        #经过一个隐藏层一个全连接层
         self.answer_cls = nn.Sequential(
                 nn.Linear(mcan_flat_out_size, hidden_size),
                 nn.GELU(),
@@ -137,6 +139,7 @@ class ScanQA(nn.Module):
         data_dict["seed_features"] = features
         xyz, features = self.voting_net(xyz, features) # batch_size, vote_feature_dim, num_seed * vote_factor, (16, 256, 1024)
         features_norm = torch.norm(features, p=2, dim=1)
+        #特征向量归一化
         features = features.div(features_norm.unsqueeze(1))
         data_dict["vote_xyz"] = xyz
         data_dict["vote_features"] = features
@@ -188,6 +191,8 @@ class ScanQA(nn.Module):
         #          PROPOSAL MATCHING          #
         #                                     #
         #######################################
+        #若为True,模型会利用对象检测的参考信息，即每个检测到的对象在三维空间中的位置和姿态等信息，以及对象的置信度分数等
+        #若为False,模型不会使用对象检测的参考信息，仅依赖于问题描述和对象检测的特征来进行推理
         if self.use_reference:   
             #  data_dict["cluster_ref"]:
             #  tensor([[-0.2910, -0.2910, -0.1096],
