@@ -6,6 +6,7 @@ from models.voting_module import VotingModule
 from models.proposal_module import ProposalModule
 from models.lang_module import LangModule
 
+
 class ScanQA(nn.Module):
     def __init__(self, num_answers, 
         # proposal
