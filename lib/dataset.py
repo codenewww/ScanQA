@@ -58,11 +58,13 @@ class Answer(object):
         self.vocab = {x: i for i, x in enumerate(answers)}
         self.rev_vocab = dict((v, k) for k, v in self.vocab.items())
 
+    #将索引转换为词汇
     def itos(self, i):
         if i == self.ignore_idx:
             return self.unk_token
         return self.rev_vocab[i]
 
+    #将词汇转换为索引
     def stoi(self, v):
         if v not in self.vocab:
             #return self.vocab[self.unk_token]
@@ -78,7 +80,7 @@ class ScannetQADataset(Dataset):
             use_unanswerable=False,
             answer_cands=None,
             answer_counter=None,
-            answer_cls_loss='ce',
+            answer_cls_loss='ce',  #答案分类损失默认为交叉熵损失
             split='train', 
             num_points=40000,
             use_height=False, 
@@ -103,6 +105,7 @@ class ScannetQADataset(Dataset):
             if use_unanswerable: 
                 self.scanqa = scanqa
             else:
+                #从scanqa中过滤出包含在answer_cands中的答案的数据，求的是集合的交集
                 self.scanqa = [data for data in scanqa if len(set(data['answers']) & set(answer_cands)) > 0]
             self.answerable_data_size = len(self.scanqa)
             print('all train:', self.all_data_size)
@@ -135,21 +138,25 @@ class ScannetQADataset(Dataset):
         self.use_multiview = use_multiview
         self.augment = augment
 
-        # tokenize a question to tokens
+        # ###tokenize a question to tokens
         scene_ids = sorted(set(record['scene_id'] for record in self.scanqa))
+            #将场景ID转换为场景编号
         self.scene_id_to_number = {scene_id:int(''.join(re.sub('scene', '', scene_id).split('_'))) for scene_id in scene_ids}
+            #将场景编号映射回场景ID
         self.scene_number_to_id = {v: k for k, v in self.scene_id_to_number.items()}
 
         self.use_bert_embeds = False
+        #如果未提供tokenizer，则使用spaCy进行分词（对于question）
         if tokenizer is None:
             from spacy.tokenizer import Tokenizer
             from spacy.lang.en import English
             nlp = English()
-            # Create a blank Tokenizer with just the English vocab
+            # Create a blank Tokenizer with just the English vocab，使用英语词汇创建空的分词器
             spacy_tokenizer = Tokenizer(nlp.vocab)
             
             def tokenize(sent):
                 sent = sent.replace('?', ' ?')
+                #将句子分词为单词列表
                 return [token.text for token in spacy_tokenizer(sent)]
 
             for record in self.scanqa:
@@ -173,6 +180,7 @@ class ScannetQADataset(Dataset):
         if self.split != 'test':
             object_ids = self.scanqa[idx]['object_ids']
             object_names = [' '.join(object_name.split('_')) for object_name in self.scanqa[idx]['object_names']]
+        #如果是测试集，不获取目标ID和名称
         else:            
             object_ids = None
             object_names = None            
@@ -181,23 +189,30 @@ class ScannetQADataset(Dataset):
         answers = self.scanqa[idx].get('answers', [])
 
         answer_cats = np.zeros(self.num_answers) 
+        #将答案转换为索引列表
         answer_inds = [self.answer_vocab.stoi(answer) for answer in answers]
 
+        #如果有答案计数器，计算答案类别的得分
         if self.answer_counter is not None:        
             answer_cat_scores = np.zeros(self.num_answers)
             for answer, answer_ind in zip(answers, answer_inds):
                 if answer_ind < 0:
-                    continue                    
+                    continue  
+                #表明该类别是一个有效的答案类别。即answer_cats 数组中的 1 表示在实际答案中存在这一类别。
                 answer_cats[answer_ind] = 1
+                #获取该答案得分
                 answer_cat_score = get_answer_score(self.answer_counter.get(answer, 0))
                 answer_cat_scores[answer_ind] = answer_cat_score
 
+            #如果不使用不可回答的问题，确保至少有一个答案。
             if not self.use_unanswerable:
                 assert answer_cats.sum() > 0
                 assert answer_cat_scores.sum() > 0
         else:
             raise NotImplementedError
 
+        #获取答案类别的最大值索引。在 answer_cats 数组中，由于只有 0 和 1，因此 argmax() 将返回 1 的第一个索引，即被设置为 1 的位置。
+        #这样可以确定哪个答案类别被认为是最相关的或最可能的。
         answer_cat = answer_cats.argmax()
 
         #
@@ -209,6 +224,7 @@ class ScannetQADataset(Dataset):
             lang_feat['attention_mask'] = lang_feat['attention_mask'].astype(np.float32)
             if 'token_type_ids' in lang_feat:
                 lang_feat['token_type_ids'] = lang_feat['token_type_ids'].astype(np.int64)
+            #获取语言特征的长度
             lang_len = self.scanqa[idx]['token']['input_ids'].shape[1]
         else:
             lang_feat = self.lang[scene_id][question_id]
@@ -218,16 +234,23 @@ class ScannetQADataset(Dataset):
         #
         # get point cloud features
         #
+        #提取 scene_id 对应场景的网格顶点数据
+        #这通常是一个二维数组，其中每行代表一个顶点，包含其空间坐标和可能的其他信息（如颜色、法线）。
         mesh_vertices = self.scene_data[scene_id]['mesh_vertices']
+        #提取每个顶点的实例标签，通常用于标识不同的对象或实例
         instance_labels = self.scene_data[scene_id]['instance_labels']
+        #提取每个顶点的语义标签，通常用于标识顶点所属的类别
         semantic_labels = self.scene_data[scene_id]['semantic_labels']
+        #提取每个实例的边界框，通常用于描述对象的空间位置和尺寸
         instance_bboxes = self.scene_data[scene_id]['instance_bboxes']
 
         if not self.use_color:
+            #只保留前三列，即空间坐标（x, y, z）
             point_cloud = mesh_vertices[:,0:3]
             pcl_color = mesh_vertices[:,3:6]
         else:
             point_cloud = mesh_vertices[:,0:6] 
+            #将颜色信息进行标准化处理
             point_cloud[:,3:6] = (point_cloud[:,3:6]-MEAN_COLOR_RGB)/256.0
             pcl_color = point_cloud[:,3:6]
         
@@ -236,6 +259,7 @@ class ScannetQADataset(Dataset):
             point_cloud = np.concatenate([point_cloud, normals],1) # p (50000, 7)
 
         if self.use_height:
+            #计算点云中 z 轴坐标的 99 %作为地面高度。
             floor_height = np.percentile(point_cloud[:,2],0.99)
             height = point_cloud[:,2] - floor_height
             point_cloud = np.concatenate([point_cloud, np.expand_dims(height, 1)],1)
@@ -258,6 +282,7 @@ class ScannetQADataset(Dataset):
             point_cloud = np.concatenate([point_cloud, multiview],1) # p (50000, 135)
         #'''
 
+        #随机采样，返回选择的点云数据和选择的索引
         point_cloud, choices = random_sampling(point_cloud, self.num_points, return_choices=True)        
         instance_labels = instance_labels[choices]
         semantic_labels = semantic_labels[choices]
