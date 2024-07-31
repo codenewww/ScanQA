@@ -23,6 +23,7 @@ SCANQA_TRAIN = json.load(open(os.path.join(CONF.PATH.SCANQA, project_name + "_tr
 SCANQA_VAL = json.load(open(os.path.join(CONF.PATH.SCANQA, project_name + "_val.json")))
 
 # constants
+#继承ScannetDatasetConfig 类，该类是一个配置类，用于管理与 ScanNet 数据集相关的各种配置信息和实用函数。
 DC = ScannetQADatasetConfig()
 
 def parse_option():
@@ -110,16 +111,23 @@ def parse_option():
     return args
     
 
+#从给定的问答数据集中提取候选答案，并根据一定的频率阈值筛选出最常见的答案。
 def get_answer_cands(args, scanqa):
+    #得到一个由所有answer的字符串组成的列表
     answer_counter = sum([data["answers"] for data in scanqa["train"]], [])
+    #统计答案的出现次数，返回一个包含答案及其出现次数的 Counter 对象
     answer_counter = collections.Counter(sorted(answer_counter))
+    #返回不同答案的数量
     num_all_answers = len(answer_counter)
     answer_max_size = args.answer_max_size
     if answer_max_size < 0:
+        #此时考虑所有答案
         answer_max_size = len(answer_counter)
-    #创建字典对象，包含概率最高的几个元素，只保留出现频率高于指定的答案
+    #创建字典对象，包含概率最高的几个元素，只保留出现频率高于指定的答案（键是答案，值是出现次数）
     answer_counter = dict([x for x in answer_counter.most_common()[:answer_max_size] if x[1] >= args.answer_min_freq])
-    print("using {} answers out of {} ones".format(len(answer_counter), num_all_answers))    
+    #使用的答案数量和总答案数量
+    print("using {} answers out of {} ones".format(len(answer_counter), num_all_answers))
+    #获取筛选后的候选答案的列表，并按字典序排序（列表是答案字符串的列表）
     answer_cands = sorted(answer_counter.keys())
     return answer_cands, answer_counter
 
@@ -334,6 +342,7 @@ def get_scannet_scene_list(split):
 
 def get_scanqa(scanqa_train, scanqa_val, train_num_scenes, val_num_scenes):
     # get initial scene list
+    #集合去除列表生成的重复的场景id，sorted表示按id升序排序
     train_scene_list = sorted(list(set([data["scene_id"] for data in scanqa_train])))
     val_scene_list = sorted(list(set([data["scene_id"] for data in scanqa_val])))
 
@@ -382,7 +391,7 @@ def train(args):
 
     # init training dataset
     print("preparing data...")
-    #根据自定义的train和val的需求场景数目生成对应场景列表
+    #根据自定义的train和val的需求场景数目生成对应场景列表，根据args定义的train和val的num_scenes，对原始数据集切片化，生成适合任务的数据集，all_scene_list是包含train和Val的所有场景id的列表
     scanqa_train, scanqa_val, all_scene_list = get_scanqa(SCANQA_TRAIN, SCANQA_VAL, args.train_num_scenes, args.val_num_scenes)
     scanqa = {
         "train": scanqa_train,
