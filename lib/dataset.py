@@ -289,6 +289,7 @@ class ScannetQADataset(Dataset):
         pcl_color = pcl_color[choices]
         
         # ------------------------------- LABELS ------------------------------    
+        #定义一些标签变量，表示的是场景中目标的属性（角度、类别、大小等）
         target_bboxes = np.zeros((MAX_NUM_OBJ, 6))
         target_bboxes_mask = np.zeros((MAX_NUM_OBJ))    
         angle_classes = np.zeros((MAX_NUM_OBJ,))
@@ -305,7 +306,9 @@ class ScannetQADataset(Dataset):
 
         if self.split != 'test':
             num_bbox = instance_bboxes.shape[0] if instance_bboxes.shape[0] < MAX_NUM_OBJ else MAX_NUM_OBJ
+            #设置有效目标边界框的掩码，表示这些边界框是有效的。
             target_bboxes_mask[0:num_bbox] = 1
+            #将实际的边界框数据复制到 target_bboxes 中，包括中心坐标和尺寸信息。
             target_bboxes[0:num_bbox,:] = instance_bboxes[:MAX_NUM_OBJ,0:6]
 
             point_votes = np.zeros([self.num_points, 3])
@@ -315,6 +318,7 @@ class ScannetQADataset(Dataset):
             if self.augment and not self.debug:
                 if np.random.random() > 0.5:
                     # Flipping along the YZ plane
+                    #表示选取点云数据中所有点的第一个坐标值，即 x 坐标。: 表示选择所有行，0 表示选择第1列。
                     point_cloud[:,0] = -1 * point_cloud[:,0]
                     target_bboxes[:,0] = -1 * target_bboxes[:,0]                
                     
@@ -342,6 +346,7 @@ class ScannetQADataset(Dataset):
                 target_bboxes = rotate_aligned_boxes_along_axis(target_bboxes, rot_mat, 'z')
 
                 # Translation
+                #调用 _translate 方法对点云和目标边界框进行随机平移
                 point_cloud, target_bboxes = self._translate(point_cloud, target_bboxes)
 
             # compute votes *AFTER* augmentation
@@ -352,24 +357,31 @@ class ScannetQADataset(Dataset):
             # from the points sharing the same instance label. 
             for i_instance in np.unique(instance_labels):            
                 # find all points belong to that instance
+                # 找到属于该实例标签的所有点的索引
                 ind = np.where(instance_labels == i_instance)[0]
-                # find the semantic label            
+                # find the semantic label   
+                #检查第一个点的语义标签是否在 DC 中定义的类别中
                 if semantic_labels[ind[0]] in DC.nyu40ids:
                     x = point_cloud[ind,:3]
+                    #计算点云的中心点（即实例中心）
                     center = 0.5*(x.min(0) + x.max(0))
                     point_votes[ind, :] = center - x
                     point_votes_mask[ind] = 1.0
+            #将 votes 复制三份，以保持一致性。
             point_votes = np.tile(point_votes, (1, 3)) # make 3 votes identical 
             
+            #根据语义标签获取每个实例的类别索引
             class_ind = [DC.nyu40id2class[int(x)] for x in instance_bboxes[:num_bbox,-2]]
             # NOTE: set size class as semantic class. Consider use size2class.
             size_classes[0:num_bbox] = class_ind
+            #计算每个目标的尺寸残差，即目标的实际尺寸减去该类别的平均尺寸
             size_residuals[0:num_bbox, :] = target_bboxes[0:num_bbox, 3:6] - DC.mean_size_arr[class_ind,:]
 
             # construct the reference target label for each bbox
             ref_box_label = np.zeros(MAX_NUM_OBJ)
 
             for i, gt_id in enumerate(instance_bboxes[:num_bbox,-1]): 
+                #检查当前边界框的 ID 是否与目标对象的 ID 匹配。如果匹配，设置参考目标标签
                 if gt_id == object_ids[0]:
                     ref_box_label[i] = 1
                     ref_center_label = target_bboxes[i, 0:3]
@@ -379,18 +391,22 @@ class ScannetQADataset(Dataset):
                     ref_size_residual_label = size_residuals[i]
 
             
+            #确保至少有一个参考目标标签被设置。
             assert ref_box_label.sum() > 0
+        #在测试集的情况下，默认只有一个边界框，且不计算 votes。 
         else:
             num_bbox = 1
             point_votes = np.zeros([self.num_points, 9]) # make 3 votes identical 
             point_votes_mask = np.zeros(self.num_points)
 
         target_bboxes_semcls = np.zeros((MAX_NUM_OBJ))
+        #尝试获取边界框的语义类别索引，如果失败则忽略
         try:
             target_bboxes_semcls[0:num_bbox] = [DC.nyu40id2class[int(x)] for x in instance_bboxes[:,-2][0:num_bbox]]
         except KeyError:
             pass
 
+        #获取目标对象的名称和类别
         object_name = None if object_names is None else object_names[0]
         object_cat = self.raw2label[object_name] if object_name in self.raw2label else 17
 
@@ -436,9 +452,12 @@ class ScannetQADataset(Dataset):
         return data_dict
 
     
+    #创建一个从原始标签到标准化标签的映射
     def _get_raw2label(self):
         # mapping
+        #获取 ScanNet 数据集中的所有类别标签
         scannet_labels = DC.type2class.keys()
+        #创建一个字典，将每个类别标签映射到其对应的索引
         scannet2label = {label: i for i, label in enumerate(scannet_labels)}
 
         lines = [line.rstrip() for line in open(SCANNET_V2_TSV)]
@@ -454,8 +473,10 @@ class ScannetQADataset(Dataset):
             else:
                 raw2label[raw_name] = scannet2label[nyu40_name]
 
+        #返回原始标签到标准化标签的映射字典
         return raw2label
 
+    #用于生成一个字典，标识每个问题是否涉及唯一或多个相同类别的物体。
     def _get_unique_multiple_lookup(self):
         all_sem_labels = {}
         cache = {}
@@ -474,11 +495,14 @@ class ScannetQADataset(Dataset):
 
                 if object_id not in cache[scene_id]:
                     cache[scene_id][object_id] = {}
+                    #尝试将物体名称映射到语义标签，并添加到 all_sem_labels 中。
+                    #如果没有找到对应的映射，则添加 17（其他类）
                     try:
                         all_sem_labels[scene_id].append(self.raw2label[object_name])
                     except KeyError:
                         all_sem_labels[scene_id].append(17)
 
+        #将 all_sem_labels 转换为每个场景对应一个语义标签数组的形式
         all_sem_labels = {scene_id: np.array(all_sem_labels[scene_id]) for scene_id in all_sem_labels.keys()}
 
         unique_multiple_lookup = {}
@@ -495,6 +519,7 @@ class ScannetQADataset(Dataset):
                 except KeyError:
                     sem_label = 17
 
+                #如果该语义标签在该场景中仅出现一次，则设为 0（唯一），否则设为 1（多重）
                 unique_multiple_ = 0 if (all_sem_labels[scene_id] == sem_label).sum() == 1 else 1
                 unique_multiples.append(unique_multiple_)
 
@@ -508,9 +533,12 @@ class ScannetQADataset(Dataset):
 
         return unique_multiple_lookup
 
+    #将文本描述转换为 GloVe 词向量表示
     def _tranform_text_glove(self, token_type='token'):
         with open(GLOVE_PICKLE, 'rb') as f:
             glove = pickle.load(f)
+
+        #glove 是一个字典，其中键是词汇，值是词向量
 
         lang = {}
         for data in self.scanqa:
@@ -537,13 +565,16 @@ class ScannetQADataset(Dataset):
                         embeddings[token_id] = glove['unk']
 
             # store
+            #将词向量存储在 lang 字典中，以场景 ID 和问题 ID 为键
             lang[scene_id][question_id] = embeddings
 
         return lang
 
+    #将文本描述转换为 BERT 的输入格式
     def _tranform_text_bert(self, token_type='token'):
         lang = {}
 
+        #用于将输入的 token 序列填充到固定长度
         def pad_tokens(tokens):
             N = CONF.TRAIN.MAX_TEXT_LEN - 2 
             if tokens.ndim == 2:
@@ -613,6 +644,7 @@ class ScannetQADataset(Dataset):
             elements = lines[i].split('\t')
             raw_name = elements[1]
             nyu40_name = int(elements[4])
+            #将原始名称映射到 NYU40 类别 ID。
             raw2nyuid[raw_name] = nyu40_name
 
         # store
@@ -626,6 +658,7 @@ class ScannetQADataset(Dataset):
         # unpack
         coords = point_set[:, :3]
         # translation factors
+        #随机生成的平移因子
         x_factor = np.random.choice(np.arange(-0.5, 0.501, 0.001), size=1)[0]
         y_factor = np.random.choice(np.arange(-0.5, 0.501, 0.001), size=1)[0]
         z_factor = np.random.choice(np.arange(-0.5, 0.501, 0.001), size=1)[0]
@@ -635,4 +668,5 @@ class ScannetQADataset(Dataset):
         point_set[:, :3] = coords
         bbox[:, :3] += factor
 
+        #返回平移后的点云数据和边界框
         return point_set, bbox
