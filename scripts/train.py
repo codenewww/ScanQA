@@ -163,6 +163,7 @@ def get_dataloader(args, scanqa, all_scene_list, split, config, augment):
     return dataset, dataloader
 
 
+#args是提供的参数，config是数据集配置
 def get_model(args, config):
     if "bert-" in args.tokenizer_name:
         from transformers import AutoConfig
@@ -240,6 +241,7 @@ def get_solver(args, dataloader):
     #wandb.watch(model, log_freq=100)
 
     if args.optim_name == 'adam':
+        #将模型的参数收集到一个列表中，用于传递给优化器
         model_params = [{"params": model.parameters()}]
         optimizer = optim.Adam(
             model_params,
