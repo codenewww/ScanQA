@@ -59,18 +59,22 @@ class ScanQA(nn.Module):
                                     finetune_bert_last_layer=finetune_bert_last_layer)           
 
         # Ojbect detection
+        #提取点云数据特征
         self.detection_backbone = Pointnet2Backbone(input_feature_dim=input_feature_dim, 
                                                 width=pointnet_width, depth=pointnet_depth,
                                                 seed_feat_dim=seed_feat_dim)
         # Hough voting
+        #通过投票机制获得物体候选点
         self.voting_net = VotingModule(vote_factor, seed_feat_dim)
 
         # Vote aggregation and object proposal
+        #生成物体候选框及类别等信息
         self.proposal_net = ProposalModule(num_object_class, num_heading_bin, num_size_cluster, mean_size_arr, 
                                         num_proposal, sampling, seed_feat_dim=seed_feat_dim, proposal_size=proposal_size,
                                         radius=vote_radius, nsample=vote_nsample)   
 
         # Feature projection
+        #将语言特征和对象特征投影到相同的隐空间中，方便后续融合
         self.lang_feat_linear = nn.Sequential(
             nn.Linear(lang_size, hidden_size),
             nn.GELU()
@@ -85,6 +89,7 @@ class ScanQA(nn.Module):
         self.fusion_norm = LayerNorm(mcan_flat_out_size)
 
         # Esitimate confidence
+        #用于预测每个候选框的置信度，输出：data_dict["cluster_ref"]
         self.object_cls = nn.Sequential(
                 nn.Linear(hidden_size, hidden_size),
                 nn.GELU(),
@@ -132,6 +137,7 @@ class ScanQA(nn.Module):
         data_dict = self.detection_backbone(data_dict)
                 
         # --------- HOUGH VOTING ---------
+        #候选点的三维坐标
         xyz = data_dict["fp2_xyz"]
         features = data_dict["fp2_features"] # batch_size, seed_feature_dim, num_seed, (16, 256, 1024)
         data_dict["seed_inds"] = data_dict["fp2_inds"]
@@ -142,6 +148,7 @@ class ScanQA(nn.Module):
         features_norm = torch.norm(features, p=2, dim=1)
         #特征向量归一化
         features = features.div(features_norm.unsqueeze(1))
+        #投票后的坐标
         data_dict["vote_xyz"] = xyz
         data_dict["vote_features"] = features
 
@@ -202,6 +209,7 @@ class ScanQA(nn.Module):
             #基于对象置信度分数，加权处理对象特征
             #沿第二个维度进行最大值操作，返回最大值和对应索引。[1]表示取索引值
             object_conf_feat = object_feat * data_dict['objectness_scores'].max(2)[1].float().unsqueeze(2)
+            #输出3：对象置信度，维度是(batch_size, num_proposal)
             data_dict["cluster_ref"] = self.object_cls(object_conf_feat).squeeze(-1) 
 
         lang_feat = self.attflat_lang(
@@ -222,7 +230,8 @@ class ScanQA(nn.Module):
         #                                     #
         #######################################
         if self.use_lang_cls:
-            data_dict["lang_scores"] = self.lang_cls(fuse_feat) # batch_size, num_object_classe
+            #输出1：语言分类得分
+            data_dict["lang_scores"] = self.lang_cls(fuse_feat) # batch_size, num_object_classes
 
         #######################################
         #                                     #
@@ -230,6 +239,7 @@ class ScanQA(nn.Module):
         #                                     #
         #######################################
         if self.use_answer:
+            #输出2：答案分类得分
             data_dict["answer_scores"] = self.answer_cls(fuse_feat) # batch_size, num_answers
 
         return data_dict
