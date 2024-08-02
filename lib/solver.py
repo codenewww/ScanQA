@@ -607,7 +607,8 @@ class Solver():
         mean_est_val_time = np.mean([fetch + forward for fetch, forward in zip(fetch_time, forward_time)])
         #计算剩余的训练时间（ETA），根据当前迭代数和总迭代数的差值，以及平均训练时间
         eta_sec = (self._total_iter["train"] - self._global_iter_id - 1) * mean_train_time
-        #？？？
+        #计算在训练过程中进行的验证步骤的时间，添加到总ETA中。
+        #（因为前向的feed函数在train中的val会再次经历一个for循环，第一个参数对应内层foe，第二个参数对应外层for。
         eta_sec += len(self.dataloader["val"]) * np.ceil(self._total_iter["train"] / self.val_step) * mean_est_val_time
         #将ETA从秒转换为小时、分钟、秒的格式
         eta = decode_eta(eta_sec)
