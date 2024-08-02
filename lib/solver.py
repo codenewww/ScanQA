@@ -19,6 +19,7 @@ sys.path.append(os.path.join(os.getcwd(), "lib")) # HACK add the lib folder
 from lib.config import CONF
 from lib.loss_helper import get_loss 
 from lib.eval_helper import get_eval
+#用于估算剩余时间
 from utils.eta import decode_eta
 from lib.pointnet2.pytorch_utils import BNMomentumScheduler
 import pandas as pd
@@ -126,7 +127,9 @@ class Solver():
         self.config = config
         self.dataloader = dataloader
         self.optimizer = optimizer
+        #标识训练任务的唯一字符串，用于日志记录和模型保存
         self.stamp = stamp
+        #表示每隔多少个训练步长进行一次验证
         self.val_step = val_step
         self.cur_criterion = cur_criterion
 
@@ -187,6 +190,7 @@ class Solver():
 
         # training log
         log_path = os.path.join(CONF.PATH.OUTPUT, stamp, "log.txt")
+        用于写入日志文件的文件对象
         self.log_fout = open(log_path, "a")
 
         # private
@@ -202,6 +206,7 @@ class Solver():
 
         # lr scheduler
         if lr_decay_step and lr_decay_rate:
+            #判断衰减的步长是否为list类型
             if isinstance(lr_decay_step, list):
                 self.lr_scheduler = MultiStepLR(optimizer, lr_decay_step, lr_decay_rate)
             else:
@@ -220,6 +225,7 @@ class Solver():
         else:
             self.bn_scheduler = None
 
+    #用于启动训练过程
     def __call__(self, epoch, verbose):
         self._start()
         # setting
@@ -233,6 +239,7 @@ class Solver():
             try:
                 self._log("epoch {} starting...".format(epoch_id + 1))
                 # feed 
+                #用feed方法来训练，期间保存模型
                 self._feed(self.dataloader["train"], "train", epoch_id)
 
                 self._log("saving last models...\n")
@@ -259,6 +266,7 @@ class Solver():
 
     def _start(self):
         # save commandline 
+        #sys.argv表示程序传入发所有命令行参数
         cmd = " ".join([v for v in sys.argv])
         cmd_file = os.path.join(CONF.PATH.OUTPUT, self.stamp, "cmdline.txt")
         open(cmd_file, 'w').write(cmd)
@@ -266,9 +274,12 @@ class Solver():
 
     def _log(self, info_str):
         self.log_fout.write(info_str + "\n")
+        #刷新文件缓冲区，将缓冲区中的内容写入到磁盘，以确保日志信息立即保存。
         self.log_fout.flush()
         print(info_str)
 
+    #初始化或重置指定阶段（phase，如"train"或"val"）的日志字典
+    #这个方法在每个训练或验证周期开始时调用，用于清除上一周期的日志信息，准备记录新的数据
     def _reset_log(self, phase):
         self.log[phase] = {
             # info
@@ -306,6 +317,7 @@ class Solver():
     def _set_phase(self, phase):
         if phase == "train":
             self.model.train()
+        #冻结 dropout 和 batch normalization 层的行为
         elif phase == "val":
             self.model.eval()
         else:
@@ -317,10 +329,12 @@ class Solver():
 
     def _backward(self):
         # optimize
+        #清零所有模型参数的梯度。这是为了防止梯度累加，确保每次反向传播时计算的梯度是当前批次的梯度。
         self.optimizer.zero_grad()
         self._running_log["loss"].backward()
 
         # gradient clipping
+        #self.max_grad_norm 表示梯度的最大范数，如果超过这个值，则进行裁剪以防止梯度爆炸。
         if self.max_grad_norm is not None and self.max_grad_norm > 0:
             nn.utils.clip_grad_value_(self.model.parameters(), clip_value=self.max_grad_norm)
 
@@ -347,6 +361,7 @@ class Solver():
         self._running_log["sem_cls_loss"] = data_dict["sem_cls_loss"]
         self._running_log["loss"] = data_dict["loss"]
 
+    #主要用于计算评估指标并记录到日志中
     def _eval(self, data_dict):
         data_dict = get_eval(
             data_dict=data_dict,
@@ -361,6 +376,7 @@ class Solver():
             self._running_log["ref_acc"] = np.mean(data_dict["ref_acc"])     
         if "lang_acc" in data_dict:
             self._running_log["lang_acc"] = data_dict["lang_acc"].item()
+        #答案的前1和前10准确率
         self._running_log["answer_acc_at1"] = data_dict["answer_acc_at1"].item()
         self._running_log["answer_acc_at10"] = data_dict["answer_acc_at10"].item()
         self._running_log["obj_acc"] = data_dict["obj_acc"].item()
@@ -386,6 +402,7 @@ class Solver():
         for data_dict in dataloader:
             # move to cuda
             for key in data_dict:
+                #如果值是一个字典，则递归地将字典中的每个张量移至GPU
                 if type(data_dict[key]) is dict:
                     data_dict[key] = {k:v.cuda() for k, v in data_dict[key].items()}
                 else:
@@ -417,6 +434,7 @@ class Solver():
             # load
             self.log[phase]["fetch"].append(data_dict["load_time"].sum().item())
 
+            #启用异常检测，以便在反向传播期间捕获异常。
             with torch.autograd.set_detect_anomaly(True):
                 # forward
                 start = time.time()
@@ -425,6 +443,7 @@ class Solver():
                 self.log[phase]["forward"].append(time.time() - start)
 
                 # backward
+                #如果是训练阶段（phase == "train"），则执行反向传播和优化步骤
                 if phase == "train":
                     start = time.time()
                     self._backward()
@@ -440,11 +459,14 @@ class Solver():
             for key in self._running_log.keys():
                 value = self._running_log[key] # score or loss
                 if type(value) == torch.Tensor:
+                    #将其转换为标量
                     value = value.item() # if loss
                 self.log[phase][key].append(value)
+            #计算可回答问题的比例
             answerable_rate = self.answerable_data_size[phase] / self.all_data_size[phase]
 
             if "pred_langs" in data_dict:
+                # 获取预测语言的最大索引，axis=1表示每一行的最大值的索引
                 self.log[phase]["pred_lang"] += data_dict["pred_langs"].argmax(axis=1).tolist() 
 
             if "pred_answers" in data_dict:
@@ -455,6 +477,7 @@ class Solver():
 
             # report
             if phase == "train":
+                #计算当前迭代的总时间
                 iter_time = self.log[phase]["fetch"][-1]
                 iter_time += self.log[phase]["forward"][-1]
                 iter_time += self.log[phase]["backward"][-1]
@@ -462,6 +485,7 @@ class Solver():
                 self.log[phase]["iter_time"].append(iter_time)
                 
                 if (self._global_iter_id + 1) % self.verbose == 0:
+                    #打印训练报告
                     self._train_report(epoch_id)
 
                 # evaluation
@@ -475,11 +499,14 @@ class Solver():
 
                 # dump log
                 self._dump_log("train")
+                #表示对于一个data_dict数据
                 self._global_iter_id += 1
 
         # check best
         if phase == "val":
+            #计算当前指标（如准确率或损失）的平均值
             cur_best = np.mean(self.log[phase][self.cur_criterion])
+            #如果当前指标优于历史最佳指标
             if cur_best > self.best[self.cur_criterion]:
                 self._log("best val_{} achieved: {}".format(self.cur_criterion, cur_best))
                 self._log("current train_loss: {}".format(np.mean(self.log["train"]["loss"])))
@@ -493,6 +520,7 @@ class Solver():
 
                 # WandB logging of best_val_score
                 for key, value in self.best.items():
+                    #round为四舍五入函数，第二位为小数点后保存位数
                     wandb.log({"best_val/{}".format(key): round(value, 5)}, step=self._global_iter_id)
 
                 # save model
@@ -501,15 +529,18 @@ class Solver():
 
                 if "pred_answer" in self.log[phase]:
                     pred_answer_idxs = self.log[phase]["pred_answer"]
+                    #将预测答案的索引转换为实际答案文本
                     pred_answers = [self.dataloader["val"].dataset.answer_vocab.itos(pred_answer_idx) for pred_answer_idx in pred_answer_idxs]
 
                     qa_id_df = pd.DataFrame([self.log[phase]["scene_id"], self.log[phase]["question_id"]]).T
+                    #设置 DataFrame 的列名
                     qa_id_df.columns = ["scene_id", "question_id"]                    
                     if len(self.log[phase]["pred_lang"]) != 0:
                         pred_lang_idxs = self.log[phase]["pred_lang"]
 
                         # dataloader.iterable
                         pred_langs = [self.dataloader["val"].dataset.label2raw[pred_lang_idx] for pred_lang_idx in pred_lang_idxs]
+                        #创建包含语言索引、语言文本、答案索引和答案文本的 DataFrame。
                         pred_ansewr_df = pd.DataFrame([pred_lang_idxs, pred_langs, pred_answer_idxs, pred_answers]).T
                         pred_ansewr_df.columns = ["pred_lang_idx", "pred_lang", "pred_answer_idx", "pred_answer"]                        
                     else:
@@ -521,12 +552,14 @@ class Solver():
                     pred_ansewr_df.to_csv(os.path.join(model_root, "best_val_pred_answers.csv"), index=False)
 
                 # save model
+                #保存模型的状态字典（权重和偏置）到指定路径。
                 torch.save(self.model.state_dict(), os.path.join(model_root, "model.pth"))
 
 
     def _dump_log(self, phase):
         for loss_or_score in ["loss", "score"]:
             for key in LOG_SCORE_KEYS[loss_or_score]:
+                #计算指定键的所有记录值的平均值
                 value = np.mean([v for v in self.log[phase][key]])
                 # TensorBoard
                 self._log_writer[phase].add_scalar(
@@ -572,8 +605,11 @@ class Solver():
 
         mean_train_time = np.mean(iter_time)
         mean_est_val_time = np.mean([fetch + forward for fetch, forward in zip(fetch_time, forward_time)])
+        #计算剩余的训练时间（ETA），根据当前迭代数和总迭代数的差值，以及平均训练时间
         eta_sec = (self._total_iter["train"] - self._global_iter_id - 1) * mean_train_time
+        #？？？
         eta_sec += len(self.dataloader["val"]) * np.ceil(self._total_iter["train"] / self.val_step) * mean_est_val_time
+        #将ETA从秒转换为小时、分钟、秒的格式
         eta = decode_eta(eta_sec)
 
         iter_report_dic = {}
